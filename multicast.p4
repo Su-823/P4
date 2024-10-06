@@ -53,6 +53,14 @@ parser MyParser(packet_in packet,
     state start {
         /* TODO: your code here */
         /* Hint: implement your parser */
+        packet.extract(hdr.ethernet);
+        transition select(hdr.ethernet.etherType){
+            TYPE_MCAST: parse_multi_cast;
+            default: accept;
+        }
+    }
+    state parse_multi_cast{
+        packet.extract(hdr.multicast_grp);
         transition accept;
     }
 
@@ -86,10 +94,27 @@ control MyIngress(inout headers hdr,
 
     action multicast() {
         /* TODO: Your code here */
+        if (hdr.multicast_grp.mcast_grp == 12){
+            standard_metadata.mcast_grp=12;
+            meta.update_mac = 1;
+        }
+        else if (hdr.multicast_grp.mcast_grp == 13){
+            standard_metadata.mcast_grp=13;
+            meta.update_mac = 1;
+        }
+        else if (hdr.multicast_grp.mcast_grp == 23){
+            standard_metadata.mcast_grp=23;
+            meta.update_mac = 1;
+        }
+        else if (hdr.multicast_grp.mcast_grp==1){
+            standard_metadata.mcast_grp=1;
+            meta.update_mac=1;
+        }
     }
 
     action mac_forward(egressSpec_t port) {
         /*  TODO: your code here */
+        standard_metadata.egress_spec = port;
     }
 
     table mac_lookup {
@@ -105,12 +130,34 @@ control MyIngress(inout headers hdr,
         default_action = broadcast;
     }
 
+    table multicast_lookup {
+        key = {
+            hdr.ethernet.dstAddr: exact;
+        }
+        actions = {
+            multicast;
+            mac_forward;
+            drop;
+        }
+        size = 1024;
+        default_action = multicast;
+    }
+    
     apply {
 
         /*  TODO: your code here */
         /*  HINT: do you need any metadata? */
-
-        mac_lookup.apply();
+        if (hdr.multicast_grp.isValid()){
+            if (hdr.multicast_grp.mcast_grp==0){
+                mac_lookup.apply();
+            }
+            else{
+                multicast_lookup.apply();
+            }
+        }
+        else{
+            mac_lookup.apply();
+        }
 
     }
 
@@ -131,6 +178,7 @@ control MyEgress(inout headers hdr,
     action set_mac_dst_addr(macAddr_t addr) {
         /* TODO: your code here */
         /* HINT: update MAC address */
+        hdr.ethernet.dstAddr = addr;
     }
 
     table port_to_mac {
@@ -147,8 +195,13 @@ control MyEgress(inout headers hdr,
 
     apply {
         /* TODO: your code here */
+        if (standard_metadata.egress_port == standard_metadata.ingress_port){
+            drop();
+        }
 
-        port_to_mac.apply();
+        if (meta.update_mac==1){
+            port_to_mac.apply();
+        }
         
     }
 }
@@ -169,6 +222,9 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
 control MyDeparser(packet_out packet, in headers hdr) {
     apply {
         /* TODO: your code here */
+        packet.emit(hdr.ethernet);
+        packet.emit(hdr.multicast_grp);
+
     }
 }
 
