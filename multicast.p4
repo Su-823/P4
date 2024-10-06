@@ -195,9 +195,9 @@ control MyEgress(inout headers hdr,
 
     apply {
         /* TODO: your code here */
-        if (standard_metadata.egress_port == standard_metadata.ingress_port){
-            drop();
-        }
+        //if (standard_metadata.egress_port == standard_metadata.ingress_port){
+        //    drop();
+        //}
 
         if (meta.update_mac==1){
             port_to_mac.apply();
