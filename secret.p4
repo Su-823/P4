@@ -77,7 +77,7 @@ header secret_t {
     bit<32> salt;
     bit<32> pw_hash;
     bit<16> opCode;
-    bit<32> mailboxNum;
+    bit<16> mailboxNum;
     bit<32> message;
 }
 
@@ -111,7 +111,7 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
             TYPE_IPV4: parse_ipv4;
-            TYPE_SECRET: secret;
+            //TYPE_SECRET: secret;
             default: accept;
         }
     }
@@ -124,15 +124,17 @@ parser MyParser(packet_in packet,
         }
     }
 
+    
+    state udp {
+        packet.extract(hdr.udp);
+        transition select(hdr.udp.srcPort){
+            TYPE_SECRET: secret;
+            default: accept;
+        }
+    }
     state secret {
        packet.extract(hdr.secret);
        transition accept;
-    }
-
-    state udp {
-        packet.extract(hdr.udp);
-        //packet.extract(hdr.secret);
-        transition accept;
     }
 
 }
@@ -157,7 +159,7 @@ control MyIngress(inout headers hdr,
     
     register<bit<32>>(65536) secret_mailboxes;
     register<bit<32>>(65536) msg_checksums;
-    bit<32> hased_pwd;
+    //bit<32> hased_pwd;
     bit<32> checksum;
     action drop() {
         mark_to_drop(standard_metadata);
@@ -167,20 +169,20 @@ control MyIngress(inout headers hdr,
         standard_metadata.egress_spec = port;
     }
 
-    action compute_hashes( bit<32> passward){
-       hash(hased_pwd, HashAlgorithm.crc32, (bit<32>)0, {passward},MAX_HASHED_VAL);
-    }
+    //action compute_hashes( bit<32> passward){
+    //   hash(hased_pwd, HashAlgorithm.crc32, (bit<32>)0, {passward},MAX_HASHED_VAL);
+    //}
     action compute_checksum( bit<32> message){
-       hash(checksum, HashAlgorithm.crc32, (bit<32>)0, {message}, MAX_HASHED_VAL);
+       hash(checksum, HashAlgorithm.csum16, (bit<32>)0, {message}, MAX_HASHED_VAL);
     }
     action check_password(bit<32> stored_password) {
         /* TODO: your code here */
-        compute_hashes(stored_password + hdr.secret.salt);
-        if (hased_pwd == hdr.secret.pw_hash){
-            hdr.secret.opCode = SECRET_OPT.SUCCESS;
-        }
-        else{
+        //compute_hashes(stored_password + hdr.secret.salt);
+        bit<32> hashed_pwd;
+        hash(hashed_pwd, HashAlgorithm.crc32, (bit<32>)0, {stored_password & hdr.secret.salt},MAX_HASHED_VAL);
+        if (hashed_pwd != hdr.secret.pw_hash){
             hdr.secret.opCode = SECRET_OPT.WRONGPW;
+            //hdr.secret.hostID = hashed_pwd;
         }
     }
 
@@ -207,7 +209,7 @@ control MyIngress(inout headers hdr,
     }
 
     apply {
-        if(hdr.secret.isValid()) {
+        if(hdr.secret.isValid() && hdr.udp.srcPort==hdr.udp.dstPort) {
             /* TODO: your code here */
             /* Hint 1: verify if the secret message is destined to the switch */
 
@@ -228,36 +230,45 @@ control MyIngress(inout headers hdr,
                 password_check.apply();
                 if (hdr.secret.opCode == SECRET_OPT.DROPOFF){
                     compute_checksum(hdr.secret.message);
-                    secret_mailboxes.write(hdr.secret.mailboxNum, hdr.secret.message);
-                    msg_checksums.write(hdr.secret.mailboxNum, checksum);
+                    secret_mailboxes.write((bit<32>)hdr.secret.mailboxNum, hdr.secret.message);
+                    msg_checksums.write((bit<32>)hdr.secret.mailboxNum, checksum);
                     hdr.secret.opCode = SECRET_OPT.SUCCESS;
                 }
                 else if (hdr.secret.opCode == SECRET_OPT.PICKUP){
                     bit<32> stored_msg;
                     bit<32> stored_chechsums;
-                    secret_mailboxes.read(stored_msg,hdr.secret.mailboxNum);
-                    msg_checksums.read(stored_chechsums,hdr.secret.mailboxNum);
+                    secret_mailboxes.read(stored_msg,(bit<32>)hdr.secret.mailboxNum);
+                    msg_checksums.read(stored_chechsums,(bit<32>)hdr.secret.mailboxNum);
                     compute_checksum(stored_msg);
-                    if (stored_msg==OV_VAL){
-                        hdr.secret.opCode = SECRET_OPT.FAILURE;
-                    }
-                    else if (stored_chechsums==checksum){
+                    if (stored_chechsums==checksum){
                         hdr.secret.message = stored_msg;
                         hdr.secret.opCode = SECRET_OPT.SUCCESS;
-                        secret_mailboxes.write(hdr.secret.mailboxNum, OV_VAL);
+                        secret_mailboxes.write((bit<32>)hdr.secret.mailboxNum, OV_VAL);
                     }
                     else{
                         hdr.secret.opCode = SECRET_OPT.FAILURE;
                     }
 
                 }
+                if (hdr.udp.srcPort==TYPE_SECRET){
+
                 macAddr_t temp = hdr.ethernet.dstAddr;
                 hdr.ethernet.dstAddr = hdr.ethernet.srcAddr;
                 hdr.ethernet.srcAddr = temp;
+                
                 ip4Addr_t tmp = hdr.ipv4.dstAddr;
                 hdr.ipv4.dstAddr = hdr.ipv4.srcAddr;
                 hdr.ipv4.srcAddr = tmp;
+
+                bit<16> t = hdr.udp.dstPort;
+                hdr.udp.dstPort = hdr.udp.srcPort;
+                hdr.udp.srcPort = t;
+
                 standard_metadata.egress_spec = standard_metadata.ingress_port;
+                }
+            }
+            else{
+                drop();
             }
         }
         ipv4_forward.apply();
@@ -310,9 +321,11 @@ control MyDeparser(packet_out packet, in headers hdr) {
     apply {
         /* TODO: your code here */
         packet.emit(hdr.ethernet);
+        packet.emit(hdr.ipv4);
         packet.emit(hdr.udp);
         packet.emit(hdr.secret);
-        packet.emit(hdr.ipv4);
+        
+        
     }
 }
 
