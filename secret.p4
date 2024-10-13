@@ -3,9 +3,9 @@
 // CS5229 Programming Assignment 2
 // Part A - 2 Secret Message
 //
-// Name: Albert Einstein
-// Student Number: A0123456B
-// NetID: e0123456
+// Name: Su Mengqi
+// Student Number: A0297738E
+// NetID: e1351876
 
 #include <core.p4>
 #include <v1model.p4>
